@@ -59,6 +59,9 @@ with tab1:
     st.caption(
         "This is a Super Bowl Era Franchise Ranking system. It is based off a custom franchise performance algorithm using historical results through from 1966 (Super Bowl I), to the most recent Super Bowl."
     )
+    st.caption(
+        "There are 3 tools on this page. An All Time Franchise Ranking table, a direct Franchise comparison tool, and a line graph to show how rankings have changed over time."
+    )
 
 
     # ========================
@@ -68,7 +71,7 @@ with tab1:
     st.caption(
         "Use the controls below to filter teams, divisions, and the maximum season included in the rankings."
     )
-
+    
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -115,27 +118,92 @@ with tab1:
             filtered_ranks["Team"].isin(selected_teams)
         ]
 
-    # ========================
-    # All-Time Rankings Table
-    # ========================
-    st.subheader("All-Time Franchise Rankings")
-    st.caption(
-        "Each franchise's overall rank as of the selected year."
-    )
+    col_rank, col_snapshot = st.columns([1, 2])
 
-    all_time = (
-        filtered_ranks
-            .sort_values("Year")
-            .groupby("Team", as_index=False)
-            .last()
-            .sort_values("Rank")
-    )
+    # ========================
+    # All-Time Rankings (LEFT)
+    # ========================
+    with col_rank:
+        st.subheader("All-Time Franchise Rankings")
+        st.caption("Each franchise's overall rank as of the selected year.")
 
-    st.dataframe(
-        all_time[["Team", "Rank"]],
-        use_container_width=True,
-        hide_index=True
-    )
+        all_time = (
+            filtered_ranks
+                .sort_values("Year")
+                .groupby("Team", as_index=False)
+                .last()
+                .sort_values("Rank")
+        )
+
+        st.dataframe(
+            all_time[["Team", "Rank"]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+    # ========================
+    # Snapshot Comparison (RIGHT)
+    # ========================
+        with col_snapshot:
+            st.subheader("Snapshot Comparison")
+            st.caption(
+                "Cumulative franchise achievements compared side-by-side for the selected teams."
+            )
+
+            comparison = master[master["Team"].isin(team_options)].copy()
+            if selected_teams:
+                comparison = comparison[comparison["Team"].isin(selected_teams)]
+
+            if not comparison.empty:
+                comparison_summary = (
+                    comparison.groupby("Team")
+                    .agg({
+                        "Division": "first",
+                        "SB Win": "sum",
+                        "SB App": "sum",
+                        "CC app": "sum",
+                        "Division Title?": "sum",
+                        "MVP": "sum"
+                    })
+                    .reset_index()
+                )
+
+                year_ranks = ranks[ranks["Year"] == selected_year][["Team", "Rank"]]
+                comparison_summary = comparison_summary.merge(year_ranks, on="Team", how="left")
+
+                numeric_cols = ["SB Win", "SB App", "CC app", "Division Title?", "MVP", "Rank"]
+                for col in numeric_cols:
+                    if col in comparison_summary.columns:
+                        comparison_summary[col] = comparison_summary[col].fillna(0).astype(int)
+
+                comparison_summary = comparison_summary.rename(columns={
+                    "Rank": f"Rank in {selected_year}",
+                    "SB Win": "Super Bowl Championships",
+                    "SB App": "Conference Championships",
+                    "CC app": "Conference Championship Appearances",
+                    "Division Title?": "Division Titles",
+                    "MVP": "MVPs"
+                })
+
+                comparison_summary = comparison_summary.sort_values(by=f"Rank in {selected_year}")
+
+                ordered_stats = [
+                    "Division",
+                    f"Rank in {selected_year}",
+                    "Super Bowl Championships",
+                    "Conference Championships",
+                    "Conference Championship Appearances",
+                    "Division Titles",
+                    "MVPs"
+                ]
+
+                comparison_transposed = comparison_summary.set_index("Team")[ordered_stats].T
+
+                st.dataframe(
+                    comparison_transposed,
+                    use_container_width=True
+                )
 
     # ========================
     # Rank Over Time Chart
@@ -160,86 +228,157 @@ with tab1:
 
     st.plotly_chart(fig_rank, use_container_width=True)
 
-    # ========================
-    # Snapshot Comparison Table
-    # ========================
-    st.subheader("Snapshot Comparison")
-    st.caption(
-        "Cumulative franchise achievements compared side-by-side for the selected teams, "
-        "with rankings shown as of the selected year."
-    )
+    st.markdown("---")
+    col_division, col_years1 = st.columns(2)
 
-    # 1. Filter the master stats data
-    comparison = master[master["Team"].isin(team_options)].copy()
-    if selected_teams:
-        comparison = comparison[comparison["Team"].isin(selected_teams)]
-
-    if not comparison.empty:
-        # 2. Group by Team and sum the stats
-        # We use .reset_index() so 'Team' remains a column for merging
-        comparison_summary = (
-            comparison.groupby("Team")
-            .agg({
-                "Division": "first",
-                "SB Win": "sum",
-                "SB App": "sum",
-                "CC app": "sum",
-                "Division Title?": "sum",
-                "MVP": "sum"
-            })
-            .reset_index()
+    # ========================
+    # Division Rankings (LEFT)
+    # ========================
+    with col_division:
+        st.subheader("Division Rankings")
+        st.caption(
+            "Total franchise points accumulated by division through the most recent year."
         )
 
-        # 3. Pull the Rank for the specific selected year
-        year_ranks = ranks[ranks["Year"] == selected_year][["Team", "Rank"]]
-        
-        # Merge the Rank into our summary table
-        comparison_summary = comparison_summary.merge(year_ranks, on="Team", how="left")
+        # 1. Pull each team's latest total points
+        division_points = (
+            master
+                .groupby(["Division", "Team"], as_index=False)
+                .agg(Team_Points=("Total Team Points", "max"))
+        )
 
-        # 4. Formatting: Convert numeric stats to whole numbers (integers)
-        # This removes the .0 decimal points from the display
-        numeric_cols = ["SB Win", "SB App", "CC app", "Division Title?", "MVP", "Rank"]
-        for col in numeric_cols:
-            if col in comparison_summary.columns:
-                comparison_summary[col] = comparison_summary[col].fillna(0).astype(int)
+        # 2. Sum team points by division
+        division_summary = (
+            division_points
+                .groupby("Division", as_index=False)
+                .agg(Division_Points=("Team_Points", "sum"))
+                .sort_values("Division_Points", ascending=False)
+                .reset_index(drop=True)
+        )
 
-        # 5. Rename columns for the final display
-        rename_dict = {
-            "Rank": f"Rank in {selected_year}",
-            "Division": "Division",
-            "SB Win": "Super Bowl Championships",
-            "SB App": "Conference Championships",
-            "CC app": "Conference Championship Appearances",
-            "Division Title?": "Division Titles",
-            "MVP": "MVPs"
-        }
-        comparison_summary = comparison_summary.rename(columns=rename_dict)
+        # 3. Add Division Rank (1 = best)
+        division_summary["Division Rank"] = (
+            division_summary["Division_Points"]
+                .rank(method="dense", ascending=False)
+                .astype(int)
+        )
 
-        # 6. Sort by Rank (1 is the best, so we sort ascending)
-        comparison_summary = comparison_summary.sort_values(by=f"Rank in {selected_year}")
-
-        # 7. Define the vertical order of rows (Rank at the very top)
-        ordered_stats = [
-            "Division", 
-            f"Rank in {selected_year}",
-            "Super Bowl Championships", 
-            "Conference Championships", 
-            "Conference Championship Appearances", 
-            "Division Titles", 
-            "MVPs"
+        # 4. Reorder columns
+        division_summary = division_summary[
+            ["Division Rank", "Division", "Division_Points"]
         ]
 
-        # 8. Set Team as the index and Transpose (.T)
-        # The teams will now appear as columns, ordered by their rank
-        comparison_transposed = comparison_summary.set_index("Team")[ordered_stats].T
-
-        # 9. Display the table
+        # 5. Display
         st.dataframe(
-            comparison_transposed,
-            use_container_width=True
+            division_summary,
+            use_container_width=True,
+            hide_index=True
         )
-    else:
-        st.info("No data available for the current selection.")
+
+    division_summary["Division_Points"] = (
+    division_summary["Division_Points"].astype(int)
+    )
+
+    # ========================
+    # Years at Number 1 (RIGHT)
+    # ========================
+    with col_years1:
+        st.subheader("Years Ranked #1")
+        st.caption("Number of seasons each franchise finished ranked #1.")
+
+        years_at_1 = (
+            ranks[ranks["Rank"] == 1]
+                .groupby("Team", as_index=False)
+                .size()
+                .rename(columns={"size": "Years at #1"})
+                .sort_values("Years at #1", ascending=False)
+        )
+
+        st.dataframe(
+            years_at_1,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+
+    # st.subheader("Snapshot Comparison")
+    # st.caption(
+    #     "Cumulative franchise achievements compared side-by-side for the selected teams, "
+    #     "with rankings shown as of the selected year."
+    # )
+
+    # # 1. Filter the master stats data
+    # comparison = master[master["Team"].isin(team_options)].copy()
+    # if selected_teams:
+    #     comparison = comparison[comparison["Team"].isin(selected_teams)]
+
+    # if not comparison.empty:
+    #     # 2. Group by Team and sum the stats
+    #     # We use .reset_index() so 'Team' remains a column for merging
+    #     comparison_summary = (
+    #         comparison.groupby("Team")
+    #         .agg({
+    #             "Division": "first",
+    #             "SB Win": "sum",
+    #             "SB App": "sum",
+    #             "CC app": "sum",
+    #             "Division Title?": "sum",
+    #             "MVP": "sum"
+    #         })
+    #         .reset_index()
+    #     )
+
+    #     # 3. Pull the Rank for the specific selected year
+    #     year_ranks = ranks[ranks["Year"] == selected_year][["Team", "Rank"]]
+        
+    #     # Merge the Rank into our summary table
+    #     comparison_summary = comparison_summary.merge(year_ranks, on="Team", how="left")
+
+    #     # 4. Formatting: Convert numeric stats to whole numbers (integers)
+    #     # This removes the .0 decimal points from the display
+    #     numeric_cols = ["SB Win", "SB App", "CC app", "Division Title?", "MVP", "Rank"]
+    #     for col in numeric_cols:
+    #         if col in comparison_summary.columns:
+    #             comparison_summary[col] = comparison_summary[col].fillna(0).astype(int)
+
+    #     # 5. Rename columns for the final display
+    #     rename_dict = {
+    #         "Rank": f"Rank in {selected_year}",
+    #         "Division": "Division",
+    #         "SB Win": "Super Bowl Championships",
+    #         "SB App": "Conference Championships",
+    #         "CC app": "Conference Championship Appearances",
+    #         "Division Title?": "Division Titles",
+    #         "MVP": "MVPs"
+    #     }
+    #     comparison_summary = comparison_summary.rename(columns=rename_dict)
+
+    #     # 6. Sort by Rank (1 is the best, so we sort ascending)
+    #     comparison_summary = comparison_summary.sort_values(by=f"Rank in {selected_year}")
+
+    #     # 7. Define the vertical order of rows (Rank at the very top)
+    #     ordered_stats = [
+    #         "Division", 
+    #         f"Rank in {selected_year}",
+    #         "Super Bowl Championships", 
+    #         "Conference Championships", 
+    #         "Conference Championship Appearances", 
+    #         "Division Titles", 
+    #         "MVPs"
+    #     ]
+
+    #     # 8. Set Team as the index and Transpose (.T)
+    #     # The teams will now appear as columns, ordered by their rank
+    #     comparison_transposed = comparison_summary.set_index("Team")[ordered_stats].T
+
+    #     # 9. Display the table
+    #     st.dataframe(
+    #         comparison_transposed,
+    #         use_container_width=True
+    #     )
+    # else:
+    #     st.info("No data available for the current selection.")
 with tab2:
     # ========================
     # Reset Simulation
