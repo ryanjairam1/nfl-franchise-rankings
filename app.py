@@ -60,7 +60,7 @@ with tab1:
         "This is a Super Bowl Era Franchise Ranking system. It is based off a custom franchise performance algorithm using historical results through from 1966 (Super Bowl I), to the most recent Super Bowl."
     )
     st.caption(
-        "There are 3 tools on this page. An All Time Franchise Ranking table, a direct Franchise comparison tool, and a line graph to show how rankings have changed over time."
+        "There are 3 tools on this page. An All Time Franchise Ranking table with a team's Legacy Score, a direct Franchise comparison tool, and a line graph to show how rankings have changed over time."
     )
 
 
@@ -125,21 +125,47 @@ with tab1:
     # ========================
     with col_rank:
         st.subheader("All-Time Franchise Rankings")
-        st.caption("Each franchise's overall rank as of the selected year.")
+        st.caption(
+            "Franchise rank and cumulative points through the selected year."
+        )
 
-        all_time = (
+        # 1. Get latest rank per team (based on selected year filter)
+        latest_rank = (
             filtered_ranks
                 .sort_values("Year")
                 .groupby("Team", as_index=False)
-                .last()
-                .sort_values("Rank")
+                .last()[["Team", "Rank"]]
         )
 
+        # 2. Get Total Team Points from Master Sheet for selected year
+        master_year = master[master["Year"] == selected_year]
+
+        team_points = master_year[["Team", "Total Team Points"]]
+
+        # 3. Merge Rank + Points
+        all_time = latest_rank.merge(team_points, on="Team", how="left")
+
+        # 4. Sort by Rank
+        all_time = all_time.sort_values("Rank")
+
+        # 5. Clean formatting
+        all_time["Total Team Points"] = (
+            all_time["Total Team Points"]
+            .fillna(0)
+            .astype(int)
+        )
+        # 5.5 Rename column for display only
+        all_time = all_time.rename(
+            columns={"Total Team Points": "Team Legacy Score"}
+        )
+
+        # 6. Display
         st.dataframe(
-            all_time[["Team", "Rank"]],
+            all_time,
             use_container_width=True,
             hide_index=True
         )
+
 
 
     # ========================
@@ -164,6 +190,7 @@ with tab1:
                         "SB App": "sum",
                         "CC app": "sum",
                         "Division Title?": "sum",
+                        "Playoff Appearance?": "sum",
                         "MVP": "sum"
                     })
                     .reset_index()
@@ -172,7 +199,7 @@ with tab1:
                 year_ranks = ranks[ranks["Year"] == selected_year][["Team", "Rank"]]
                 comparison_summary = comparison_summary.merge(year_ranks, on="Team", how="left")
 
-                numeric_cols = ["SB Win", "SB App", "CC app", "Division Title?", "MVP", "Rank"]
+                numeric_cols = ["SB Win", "SB App", "CC app", "Division Title?", "Playoff Appearance?","MVP", "Rank"]
                 for col in numeric_cols:
                     if col in comparison_summary.columns:
                         comparison_summary[col] = comparison_summary[col].fillna(0).astype(int)
@@ -180,9 +207,10 @@ with tab1:
                 comparison_summary = comparison_summary.rename(columns={
                     "Rank": f"Rank in {selected_year}",
                     "SB Win": "Super Bowl Championships",
-                    "SB App": "Conference Championships",
+                    "SB App": "Super Bowl Appearances",
                     "CC app": "Conference Championship Appearances",
                     "Division Title?": "Division Titles",
+                    "Playoff Appearance?": "Playoff Appearances",
                     "MVP": "MVPs"
                 })
 
@@ -192,9 +220,10 @@ with tab1:
                     "Division",
                     f"Rank in {selected_year}",
                     "Super Bowl Championships",
-                    "Conference Championships",
+                    "Super Bowl Appearances",
                     "Conference Championship Appearances",
                     "Division Titles",
+                    "Playoff Appearances",
                     "MVPs"
                 ]
 
@@ -229,7 +258,7 @@ with tab1:
     st.plotly_chart(fig_rank, use_container_width=True)
 
     st.markdown("---")
-    col_division, col_years1 = st.columns(2)
+    col_division = st.container()
 
     # ========================
     # Division Rankings (LEFT)
@@ -278,29 +307,6 @@ with tab1:
     division_summary["Division_Points"] = (
     division_summary["Division_Points"].astype(int)
     )
-
-    # ========================
-    # Years at Number 1 (RIGHT)
-    # ========================
-    with col_years1:
-        st.subheader("Years Ranked #1")
-        st.caption("Number of seasons each franchise finished ranked #1.")
-
-        years_at_1 = (
-            ranks[ranks["Rank"] == 1]
-                .groupby("Team", as_index=False)
-                .size()
-                .rename(columns={"size": "Years at #1"})
-                .sort_values("Years at #1", ascending=False)
-        )
-
-        st.dataframe(
-            years_at_1,
-            use_container_width=True,
-            hide_index=True
-        )
-
-
 
     # st.subheader("Snapshot Comparison")
     # st.caption(
